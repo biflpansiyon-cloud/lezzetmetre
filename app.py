@@ -87,6 +87,27 @@ def get_all_feedback():
     df = pd.DataFrame(data)
     return df
 
+# --- YENİ: AI LOGLAMA FONKSİYONLARI ---
+def save_ai_log(scope, role, model, report_text):
+    """AI Raporunu Sheets'e arşivler."""
+    try:
+        client = get_google_sheet_client()
+        sheet = client.open("Pansiyon_Yemek_DB").worksheet("ai_arsiv")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sheet.append_row([timestamp, scope, role, model, report_text])
+    except Exception as e:
+        st.error(f"Arşivleme Hatası: {e}")
+
+def get_ai_logs():
+    """Arşivlenmiş raporları çeker."""
+    try:
+        client = get_google_sheet_client()
+        sheet = client.open("Pansiyon_Yemek_DB").worksheet("ai_arsiv")
+        data = sheet.get_all_records()
+        return pd.DataFrame(data)
+    except:
+        return pd.DataFrame()
+
 def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name="gemini-2.5-flash"):
     try:
         model = genai.GenerativeModel(model_name)
@@ -117,19 +138,13 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
     except Exception as e:
         return f"⚠️ Hata: {str(e)}"
 
-# --- GÖRSELLEŞTİRME FONKSİYONLARI ---
+# --- GÖRSELLEŞTİRME ---
 
 def display_colored_metric(label, value):
-    """Puanı HTML ile renkli ve büyük gösterir (HATA DÜZELTİLDİ)."""
-    # Renk Belirleme
-    if value < 3.0:
-        color = "#FF4B4B" # Kırmızı
-    elif value > 3.0:
-        color = "#09AB3B" # Yeşil
-    else:
-        color = "#FFA500" # Turuncu
+    if value < 3.0: color = "#FF4B4B"
+    elif value > 3.0: color = "#09AB3B"
+    else: color = "#FFA500"
     
-    # HTML Kodu (Değişkene atandı, böylece syntax hatası vermez)
     html_code = f"""
     <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
         <p style="font-size: 16px; margin-bottom: 5px; color: #555; font-weight: bold;">{label}</p>
@@ -139,14 +154,10 @@ def display_colored_metric(label, value):
     st.markdown(html_code, unsafe_allow_html=True)
 
 def color_dataframe_cells(val):
-    """Tablodaki hücreleri renklendirir."""
     if isinstance(val, (int, float)):
-        if val < 3:
-            return 'color: #FF4B4B; font-weight: bold'
-        elif val > 3:
-            return 'color: #09AB3B; font-weight: bold'
-        else:
-            return 'color: #FFA500; font-weight: bold'
+        if val < 3: return 'color: #FF4B4B; font-weight: bold'
+        elif val > 3: return 'color: #09AB3B; font-weight: bold'
+        else: return 'color: #FFA500; font-weight: bold'
     return ''
 
 # --- ARAYÜZ (UI) ---
@@ -230,7 +241,6 @@ elif page_mode == "Yönetici Paneli":
     if pwd == ADMIN_PWD:
         st.title("📊 Süper Admin Paneli")
         
-        # Model Seçimi
         st.sidebar.markdown("---")
         st.sidebar.subheader("🤖 AI Model Seçimi")
         available_models = get_available_gemini_models()
@@ -242,20 +252,26 @@ elif page_mode == "Yönetici Paneli":
         st.sidebar.success(f"Seçili: **{selected_model}**")
 
         if not df.empty:
-            filtre_tarih = st.radio("Zaman Aralığı", ["Bugün", "Son 7 Gün", "Tüm Kayıtlar"], horizontal=True)
+            # --- YENİ TARİH FİLTRELERİ ---
+            filtre_secenekleri = ["Bugün", "Son 7 Gün", "Son 30 Gün", "Son 6 Ay", "Tüm Kayıtlar"]
+            filtre_tarih = st.radio("Zaman Aralığı", filtre_secenekleri, horizontal=True)
+            
             now = datetime.now()
             if filtre_tarih == "Bugün":
                 df_filtered = df[df['Zaman'].dt.date == now.date()]
             elif filtre_tarih == "Son 7 Gün":
                 df_filtered = df[df['Zaman'] >= (now - timedelta(days=7))]
+            elif filtre_tarih == "Son 30 Gün":
+                df_filtered = df[df['Zaman'] >= (now - timedelta(days=30))]
+            elif filtre_tarih == "Son 6 Ay":
+                df_filtered = df[df['Zaman'] >= (now - timedelta(days=180))]
             else:
                 df_filtered = df
             
-            # --- RENKLİ KPI KARTLARI ---
-            st.markdown("### 📈 Genel Bakış")
+            # KPI KARTLARI
+            st.markdown(f"### 📈 Genel Bakış ({filtre_tarih})")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                # Sabit renkli HTML kutu (Toplam Oy)
                 html_total = f"""
                 <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
                     <p style="font-size: 16px; margin-bottom: 5px; color: #555; font-weight: bold;">Toplam Oy</p>
@@ -268,10 +284,12 @@ elif page_mode == "Yönetici Paneli":
             with c4: display_colored_metric("Servis", df_filtered['Puan_Servis'].mean())
             st.divider()
             
-            tab1, tab2, tab3 = st.tabs(["🤖 AI Rapor", "📈 Grafikler", "📝 Veriler (Renkli)"])
+            # --- SEKMELER (YENİ "ARŞİV" SEKMESİ EKLENDİ) ---
+            tab1, tab2, tab3, tab4 = st.tabs(["🤖 AI Rapor", "📈 Grafikler", "📝 Veriler", "🗄️ Rapor Arşivi"])
+            
             with tab1:
-                if st.button("Rapor Oluştur"):
-                    with st.spinner("Analiz ediliyor..."):
+                if st.button("Rapor Oluştur ve Arşivle"):
+                    with st.spinner("Analiz ediliyor ve arşivleniyor..."):
                         yorum_listesi = [str(y) for y in df_filtered['Yorum'] if str(y).strip()]
                         if not yorum_listesi:
                             st.warning("Yorum yok.")
@@ -279,16 +297,36 @@ elif page_mode == "Yönetici Paneli":
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
                             analiz = analyze_comments_with_ai(text_data, stats, role="admin", model_name=selected_model)
+                            
                             st.markdown(analiz)
+                            
+                            # ARŞİVLEME İŞLEMİ
+                            save_ai_log(scope=filtre_tarih, role="admin", model=selected_model, report_text=analiz)
+                            st.success("Rapor başarıyla 'ai_arsiv' sayfasına kaydedildi!")
+
             with tab2:
                 st.bar_chart(df_filtered[['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']].mean())
                 if 'Begenilen_Yemek' in df_filtered.columns:
                     st.write("En Beğenilenler:")
                     st.bar_chart(df_filtered['Begenilen_Yemek'].value_counts().head(5))
+            
             with tab3:
-                # --- RENKLİ TABLO ---
                 st.write("Düşük puanlar kırmızı, yüksek puanlar yeşil görünür.")
                 st.dataframe(df_filtered.style.map(color_dataframe_cells, subset=['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']))
+            
+            with tab4:
+                st.subheader("🗄️ Geçmiş AI Raporları")
+                arsiv_df = get_ai_logs()
+                if not arsiv_df.empty:
+                    # En son rapor en üstte görünsün
+                    arsiv_df = arsiv_df.sort_values(by="Zaman", ascending=False)
+                    for index, row in arsiv_df.iterrows():
+                        with st.expander(f"{row['Zaman']} - {row['Kapsam']} ({row['Role']})"):
+                            st.caption(f"Model: {row['Model']}")
+                            st.markdown(row['Rapor_Icerigi'])
+                else:
+                    st.info("Henüz arşivlenmiş rapor yok.")
+
         else:
             st.warning("Veri yok.")
 
@@ -301,7 +339,6 @@ elif page_mode == "Yönetici Paneli":
             if not df_today.empty:
                 st.subheader(f"📅 Bugünün ({now.strftime('%d.%m.%Y')}) Karnesi")
                 
-                # --- RENKLİ KPI (AŞÇI) ---
                 k1, k2, k3 = st.columns(3)
                 with k1: display_colored_metric("😋 Lezzet", df_today['Puan_Lezzet'].mean())
                 with k2: display_colored_metric("🧼 Temizlik", df_today['Puan_Hijyen'].mean())
@@ -324,7 +361,10 @@ elif page_mode == "Yönetici Paneli":
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet Puanı: {df_today['Puan_Lezzet'].mean():.1f}"
                             ozet = analyze_comments_with_ai(text_data, stats, role="cook", model_name="gemini-2.5-flash")
+                            
                             st.info(ozet)
+                            # Aşçı raporlarını da arşivleyelim
+                            save_ai_log(scope="Bugün", role="cook", model="gemini-2.5-flash", report_text=ozet)
             else:
                 st.info("Bugün veri yok.")
         else:
