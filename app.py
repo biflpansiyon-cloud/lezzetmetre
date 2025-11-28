@@ -17,7 +17,10 @@ def get_google_sheet_client():
     return client
 
 # Gemini API Bağlantısı
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+try:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+except Exception as e:
+    st.error(f"API Anahtarı hatası: {e}")
 
 # --- YARDIMCI FONKSİYONLAR ---
 
@@ -73,39 +76,40 @@ def get_all_feedback():
     return df
 
 def analyze_comments_with_ai(comments_text, stats_text, role="admin"):
-    """Gemini ile yorumları analiz eder. Role göre dil değiştirir."""
-    model = genai.GenerativeModel('gemini-pro')
+    """Gemini ile yorumları analiz eder. Hata korumalıdır."""
+    # YENİ: Daha hızlı ve kararlı model
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     if role == "cook":
-        # Aşçılar için daha samimi ve motive edici prompt
         prompt = f"""
-        Sen bir mutfak şefisin ve ekibine bugün yapılan yemekler hakkında geri bildirim veriyorsun.
-        
+        Sen bir mutfak şefisin. Aşağıdaki verileri ekibine sözlü olarak aktarıyorsun.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
         
         GÖREVİN:
-        Aşçı yamaklarına ve ustalara hitaben kısa, öz ve motive edici bir konuşma yap.
-        1. Güzel olan şeyleri öv (Motivasyon).
-        2. Varsa teknik hataları (tuz, pişme süresi, soğukluk) net bir dille uyar.
-        3. Rapor formatı kullanma, sanki mutfakta konuşuyor gibi yaz.
+        Kısa, samimi, "Ustam" diye hitap eden bir konuşma hazırla.
+        1. İyileri öv.
+        2. Kötüleri yapıcı bir dille uyar.
+        3. Asla madde işareti kullanma, paragraf olarak yaz.
         """
     else:
-        # Yönetici için resmi rapor
         prompt = f"""
-        Sen bir gıda mühendisisin. Aşağıdaki verileri analiz et.
+        Sen bir gıda mühendisisin.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
         
-        RAPOR FORMATI:
-        1. **Genel Durum:** (Tek cümle özet)
-        2. **Öne Çıkanlar (Pozitif):**
-        3. **Acil Düzeltilmesi Gerekenler:**
-        4. **Yönetici Notu:**
+        Kısa ve net bir yönetici özeti çıkar:
+        1. **Genel Durum:**
+        2. **Pozitifler:**
+        3. **Negatifler:**
+        4. **Öneri:**
         """
-        
-    response = model.generate_content(prompt)
-    return response.text
+    
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ AI Analiz Hatası: {str(e)}"
 
 # --- ARAYÜZ (UI) ---
 
@@ -176,26 +180,29 @@ if page_mode == "Öğrenci Ekranı":
                     st.success("Görüşün başarıyla kaydedildi! Teşekkürler.")
 
 # --------------------------
-# 🔐 YÖNETİCİ PANELİ (GÜNCELLENDİ)
+# 🔐 YÖNETİCİ PANELİ (GÜVENLİ & HATA KORUMALI)
 # --------------------------
 elif page_mode == "Yönetici Paneli":
     st.sidebar.title("🔐 Giriş Paneli")
     pwd = st.sidebar.text_input("Şifre", type="password")
     
-    # Verileri Çek (Her iki rol de veri kullanacak)
+    # Secrets'tan şifreleri al
+    ADMIN_PWD = st.secrets["passwords"]["admin"]
+    CHEF_PWD = st.secrets["passwords"]["chef"]
+
     try:
         df = get_all_feedback()
-        df['Zaman'] = pd.to_datetime(df['Zaman_Damgasi']) # Tarih formatı
+        if not df.empty:
+            df['Zaman'] = pd.to_datetime(df['Zaman_Damgasi'])
     except:
         df = pd.DataFrame()
 
     # --- ROL: SÜPER ADMIN ---
-    if pwd == "admin123":
+    if pwd == ADMIN_PWD:
         st.title("📊 Süper Admin Paneli")
         st.success("Yönetici girişi yapıldı.")
         
         if not df.empty:
-            # FİLTRELER
             filtre_tarih = st.radio("Zaman Aralığı", ["Bugün", "Son 7 Gün", "Tüm Kayıtlar"], horizontal=True)
             now = datetime.now()
             
@@ -206,7 +213,6 @@ elif page_mode == "Yönetici Paneli":
             else:
                 df_filtered = df
             
-            # KPI KARTLARI
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Toplam Oy", len(df_filtered))
             c2.metric("Lezzet", f"{df_filtered['Puan_Lezzet'].mean():.1f}")
@@ -215,21 +221,21 @@ elif page_mode == "Yönetici Paneli":
             
             st.divider()
             
-            # ADMIN SEKMELERİ
             tab1, tab2, tab3 = st.tabs(["🤖 Detaylı AI Rapor", "📈 Grafikler", "📝 Tüm Veriler"])
             
             with tab1:
-                if st.button("Rapor Oluştur (Yönetici)"):
+                if st.button("Rapor Oluştur"):
                     with st.spinner("Analiz ediliyor..."):
-                        # Veri Hazırlığı
-                        yorumlar = " ".join([str(y) for y in df_filtered['Yorum'] if str(y).strip()])
-                        begenilen = ", ".join([str(y) for y in df_filtered['Begenilen_Yemek'] if str(y).strip()])
-                        sikayet = ", ".join([str(y) for y in df_filtered['Sikayet_Edilen_Yemek'] if str(y).strip()])
-                        text_data = f"Yorumlar: {yorumlar}\nBeğenilen: {begenilen}\nŞikayet: {sikayet}"
-                        stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
+                        # Yorumları topla (Boş olmayanları)
+                        yorum_listesi = [str(y) for y in df_filtered['Yorum'] if str(y).strip()]
                         
-                        analiz = analyze_comments_with_ai(text_data, stats, role="admin")
-                        st.markdown(analiz)
+                        if not yorum_listesi:
+                            st.warning("Analiz yapılacak yeterli yorum yok.")
+                        else:
+                            text_data = "\n".join(yorum_listesi)
+                            stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
+                            analiz = analyze_comments_with_ai(text_data, stats, role="admin")
+                            st.markdown(analiz)
 
             with tab2:
                 st.bar_chart(df_filtered[['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']].mean())
@@ -243,45 +249,38 @@ elif page_mode == "Yönetici Paneli":
             st.warning("Henüz veri yok.")
 
     # --- ROL: AŞÇI / MUTFAK EKİBİ ---
-    elif pwd == "mutfak123":
+    elif pwd == CHEF_PWD:
         st.title("👨‍🍳 Mutfak Ekibi Paneli")
-        st.success("Hoşgeldiniz Ustalarım! Elleriniz dert görmesin.")
+        st.success("Hoşgeldiniz Ustalarım!")
         
         if not df.empty:
-            # Otomatik olarak BUGÜNÜ gösterir (Aşçı geçmişle uğraşmaz)
             now = datetime.now()
             df_today = df[df['Zaman'].dt.date == now.date()]
             
             if not df_today.empty:
                 st.subheader(f"📅 Bugünün ({now.strftime('%d.%m.%Y')}) Karnesi")
-                
-                # SADECE BÜYÜK RAKAMLAR
                 k1, k2, k3 = st.columns(3)
                 lezzet_puan = df_today['Puan_Lezzet'].mean()
-                
                 k1.metric("😋 Lezzet Puanı", f"{lezzet_puan:.1f}/5")
                 k2.metric("🧼 Temizlik", f"{df_today['Puan_Hijyen'].mean():.1f}/5")
                 k3.metric("Oy Sayısı", len(df_today))
                 
                 st.divider()
-                
                 st.subheader("📢 Öğrencilerin Mesajı")
                 
                 if st.button("Günün Özetini Oku (AI)"):
-                    with st.spinner("Yorumlar okunuyor..."):
-                        yorumlar = " ".join([str(y) for y in df_today['Yorum'] if str(y).strip()])
-                        begenilen = ", ".join([str(y) for y in df_today['Begenilen_Yemek'] if str(y).strip()])
-                        sikayet = ", ".join([str(y) for y in df_today['Sikayet_Edilen_Yemek'] if str(y).strip()])
-                        text_data = f"Yorumlar: {yorumlar}\nBeğenilen: {begenilen}\nŞikayet: {sikayet}"
-                        stats = f"Lezzet Puanı: {lezzet_puan:.1f}"
+                    with st.spinner("Hazırlanıyor..."):
+                        yorum_listesi = [str(y) for y in df_today['Yorum'] if str(y).strip()]
                         
-                        # AŞÇI MODUNDA ANALİZ ÇAĞIRIYORUZ
-                        ozet = analyze_comments_with_ai(text_data, stats, role="cook")
-                        
-                        # Mesajı güzel bir kutuda göster
-                        st.info(ozet)
+                        if not yorum_listesi:
+                            st.info("Henüz yazılı bir yorum yapılmamış ustam.")
+                        else:
+                            text_data = "\n".join(yorum_listesi)
+                            stats = f"Lezzet Puanı: {lezzet_puan:.1f}"
+                            ozet = analyze_comments_with_ai(text_data, stats, role="cook")
+                            st.info(ozet)
             else:
-                st.info("Bugün henüz yemek yenmedi veya oy kullanılmadı ustam.")
+                st.info("Bugün henüz veri girişi yok.")
         else:
             st.warning("Sistemde hiç veri yok.")
 
