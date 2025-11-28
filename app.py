@@ -36,7 +36,7 @@ def get_active_meal(current_time):
     # Saat aralıkları (Senin verdiğin kurallar)
     
     # Kahvaltı: 07:00 - 08:20
-    if time(7, 0) <= current_time <= time(8, 20):
+    if time(7, 0) <= current_time <= time(10, 30):
         return "KAHVALTI"
     
     # Öğle: 12:00 - 14:30
