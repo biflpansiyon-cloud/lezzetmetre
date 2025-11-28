@@ -33,7 +33,7 @@ def get_turkey_time():
 
 def get_active_meal(current_time):
     """Şu anki saate göre aktif öğünü belirler."""
-    if time(7, 0) <= current_time <= time(10, 20):
+    if time(7, 0) <= current_time <= time(8, 20):
         return "KAHVALTI"
     elif time(12, 0) <= current_time <= time(14, 30):
         return "ÖĞLE"
@@ -131,11 +131,16 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
         model = genai.GenerativeModel('gemini-1.5-flash')
 
     if role == "cook":
+        # --- DÜZELTME BURADA YAPILDI ---
         prompt = f"""
         Sen bir mutfak şefisin. Verileri ekibine aktarıyorsun.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
-        GÖREVİN: "Ustam" diye hitap eden, kısa, samimi, paragraf şeklinde konuşma hazırla. İyileri öv, kötüleri yapıcı uyar.
+        
+        GÖREVİN: 
+        Ekibe "Değerli Ustalarım" veya "Arkadaşlar" diye hitap et. 
+        ASLA "Ustamlar" kelimesini kullanma, bu yanlış bir ifadedir.
+        Kısa, samimi, paragraf şeklinde konuşma hazırla. İyileri öv, kötüleri yapıcı uyar.
         """
     else:
         prompt = f"""
@@ -336,7 +341,6 @@ elif page_mode == "Yönetici Paneli":
                 if not arsiv_df.empty:
                     arsiv_df = arsiv_df.sort_values(by="Zaman", ascending=False)
                     for index, row in arsiv_df.iterrows():
-                        # HATA BURADAYDI, DUZELTİLDİ: row['Role'] -> row['Rol']
                         with st.expander(f"{row['Zaman']} - {row['Kapsam']} ({row['Rol']})"):
                             st.caption(f"Model: {row['Model']}")
                             st.markdown(row['Rapor_Icerigi'])
