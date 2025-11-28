@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import google.generativeai as genai
 import re
+import pytz # Saat dilimi için gerekli
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -24,8 +25,36 @@ except Exception as e:
 
 # --- YARDIMCI FONKSİYONLAR ---
 
+def get_turkey_time():
+    """Sunucu saati ne olursa olsun Türkiye saatini döndürür."""
+    utc_now = datetime.now(pytz.utc)
+    turkey_tz = pytz.timezone('Europe/Istanbul')
+    return utc_now.astimezone(turkey_tz)
+
+def get_active_meal(current_time):
+    """Şu anki saate göre aktif öğünü belirler."""
+    # Saat aralıkları (Senin verdiğin kurallar)
+    
+    # Kahvaltı: 07:00 - 08:20
+    if time(7, 0) <= current_time <= time(8, 20):
+        return "KAHVALTI"
+    
+    # Öğle: 12:00 - 14:30
+    elif time(12, 0) <= current_time <= time(14, 30):
+        return "ÖĞLE"
+    
+    # Akşam: 18:00 - 19:00
+    elif time(18, 0) <= current_time <= time(19, 0):
+        return "AKŞAM"
+    
+    # Ara Öğün: 21:15 - 22:00
+    elif time(21, 15) <= current_time <= time(22, 0):
+        return "ARA ÖĞÜN"
+    
+    else:
+        return None # Hiçbir aralıkta değilse
+
 def get_available_gemini_models():
-    """Google hesabında tanımlı modelleri çeker."""
     try:
         model_list = []
         for m in genai.list_models():
@@ -47,7 +76,8 @@ def get_todays_menu():
     sheet = client.open("Pansiyon_Yemek_DB").worksheet("aktif_menu")
     all_values = sheet.get_all_values()
     
-    now = datetime.now()
+    # Türkiye saatine göre tarihi al
+    now = get_turkey_time()
     bugun = f"{now.day}.{now.month}.{now.year}"
     
     target_row_index = -1
@@ -87,19 +117,16 @@ def get_all_feedback():
     df = pd.DataFrame(data)
     return df
 
-# --- YENİ: AI LOGLAMA FONKSİYONLARI ---
 def save_ai_log(scope, role, model, report_text):
-    """AI Raporunu Sheets'e arşivler."""
     try:
         client = get_google_sheet_client()
         sheet = client.open("Pansiyon_Yemek_DB").worksheet("ai_arsiv")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = get_turkey_time().strftime("%Y-%m-%d %H:%M:%S")
         sheet.append_row([timestamp, scope, role, model, report_text])
     except Exception as e:
         st.error(f"Arşivleme Hatası: {e}")
 
 def get_ai_logs():
-    """Arşivlenmiş raporları çeker."""
     try:
         client = get_google_sheet_client()
         sheet = client.open("Pansiyon_Yemek_DB").worksheet("ai_arsiv")
@@ -138,13 +165,10 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
     except Exception as e:
         return f"⚠️ Hata: {str(e)}"
 
-# --- GÖRSELLEŞTİRME ---
-
 def display_colored_metric(label, value):
     if value < 3.0: color = "#FF4B4B"
     elif value > 3.0: color = "#09AB3B"
     else: color = "#FFA500"
-    
     html_code = f"""
     <div style="background-color: #f0f2f6; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);">
         <p style="font-size: 16px; margin-bottom: 5px; color: #555; font-weight: bold;">{label}</p>
@@ -165,33 +189,50 @@ def color_dataframe_cells(val):
 page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Paneli"])
 
 # --------------------------
-# 🎓 ÖĞRENCİ EKRANI
+# 🎓 ÖĞRENCİ EKRANI (ZAMAN AYARLI)
 # --------------------------
 if page_mode == "Öğrenci Ekranı":
     st.title("🍽️ LezzetMetre")
-    anlik_zaman = datetime.now()
-    tarih_gosterim = anlik_zaman.strftime("%d.%m.%Y")
-    st.info(f"📅 Tarih: **{tarih_gosterim}**")
     
-    ogun = st.selectbox("Hangi öğün için oy veriyorsun?", ["Seçiniz...", "KAHVALTI", "ÖĞLE", "AKŞAM", "ARA ÖĞÜN"])
+    # Türkiye Saatini Al
+    anlik_tr = get_turkey_time()
+    tarih_gosterim = anlik_tr.strftime("%d.%m.%Y")
+    saat_gosterim = anlik_tr.strftime("%H:%M")
     
-    if ogun != "Seçiniz...":
+    st.info(f"📅 Tarih: **{tarih_gosterim}** | 🕒 Saat: **{saat_gosterim}**")
+    
+    # Aktif Öğünü Otomatik Belirle
+    aktif_ogun = get_active_meal(anlik_tr.time())
+    
+    # EĞER AKTİF BİR YEMEK SAATİNDEYSEK
+    if aktif_ogun:
+        st.success(f"🍽️ Şu an **{aktif_ogun}** değerlendirmesi açık.")
+        
+        # Öğün adını değişkene atıyoruz (Eskiden selectbox'tan geliyordu)
+        ogun = aktif_ogun 
+        
         menu_data = get_todays_menu()
         if menu_data is None:
-            st.error(f"⚠️ {tarih_gosterim} tarihi için menü bulunamadı.")
+            st.error(f"⚠️ {tarih_gosterim} tarihi için menü planı bulunamadı.")
+            st.caption("İdare ile görüşünüz.")
         else:
             raw_menu_text = menu_data.get(ogun, "")
             yemekler = parse_yemek_listesi(raw_menu_text)
+            
             with st.form("oylama_formu"):
+                # Menü Gösterimi
                 if ogun in ["ÖĞLE", "AKŞAM"]:
                     st.markdown("### 🍲 Menüde Ne Var?")
                     if yemekler:
                         for y in yemekler: st.success(f"• {y}")
-                    else: st.warning("Menü bilgisi boş.")
+                    else: st.warning("Menü bilgisi girilmemiş.")
                 elif ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
                     st.markdown(f"**{ogun} İçeriği:**")
                     if yemekler: st.info(", ".join(yemekler))
+                
                 st.write("---")
+                
+                # Puanlama
                 if ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
                     c1, c2, c3 = st.columns(3)
                     with c1: puan_lezzet = st.slider("😋 Lezzet", 1, 5, 3)
@@ -204,24 +245,43 @@ if page_mode == "Öğrenci Ekranı":
                     with c1: puan_lezzet = st.selectbox("😋 Lezzet", [1,2,3,4,5], index=2)
                     with c2: puan_hijyen = st.selectbox("🧼 Hijyen", [1,2,3,4,5], index=2)
                     with c3: puan_servis = st.selectbox("💁‍♂️ Servis", [1,2,3,4,5], index=2)
+                    
                     if yemekler:
                         st.write("#### Detaylar (Opsiyonel):")
                         col_a, col_b = st.columns(2)
                         with col_a: begenilen = st.selectbox("🏆 En Beğendiğin?", ["Seçim Yok"] + yemekler)
                         with col_b: sikayet = st.selectbox("👎 Sorunlu Olan?", ["Seçim Yok"] + yemekler)
                     else: begenilen, sikayet = "", ""
+
                 yorum = st.text_area("Eklemek istediklerin:", placeholder="Fikrin bizim için değerli...")
                 submit = st.form_submit_button("GÖNDER 🚀")
+                
                 if submit:
                     if begenilen == "Seçim Yok": begenilen = ""
                     if sikayet == "Seçim Yok": sikayet = ""
-                    kayit = [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
+                    # Kayıt zamanı da TR saati olsun
+                    zaman_damgasi = anlik_tr.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
                     save_feedback(kayit)
                     st.balloons()
                     st.success("Görüşün başarıyla kaydedildi! Teşekkürler.")
 
+    # EĞER YEMEK SAATİ DEĞİLSE
+    else:
+        st.warning("⛔ **Şu an aktif bir yemek saati değil.**")
+        st.markdown("""
+        Değerlendirme ekranı sadece yemek saatlerinde otomatik olarak açılır.
+        
+        **Yemek Saatleri:**
+        * 🍳 **Kahvaltı:** 07:00 - 08:20
+        * 🍲 **Öğle:** 12:00 - 14:30
+        * 🥗 **Akşam:** 18:00 - 19:00
+        * 🍪 **Ara Öğün:** 21:15 - 22:00
+        """)
+
 # --------------------------
-# 🔐 YÖNETİCİ PANELİ
+# 🔐 YÖNETİCİ PANELİ (7/24 AÇIK)
 # --------------------------
 elif page_mode == "Yönetici Paneli":
     st.sidebar.title("🔐 Giriş Paneli")
@@ -252,7 +312,6 @@ elif page_mode == "Yönetici Paneli":
         st.sidebar.success(f"Seçili: **{selected_model}**")
 
         if not df.empty:
-            # --- YENİ TARİH FİLTRELERİ ---
             filtre_secenekleri = ["Bugün", "Son 7 Gün", "Son 30 Gün", "Son 6 Ay", "Tüm Kayıtlar"]
             filtre_tarih = st.radio("Zaman Aralığı", filtre_secenekleri, horizontal=True)
             
@@ -268,7 +327,6 @@ elif page_mode == "Yönetici Paneli":
             else:
                 df_filtered = df
             
-            # KPI KARTLARI
             st.markdown(f"### 📈 Genel Bakış ({filtre_tarih})")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
@@ -284,12 +342,10 @@ elif page_mode == "Yönetici Paneli":
             with c4: display_colored_metric("Servis", df_filtered['Puan_Servis'].mean())
             st.divider()
             
-            # --- SEKMELER (YENİ "ARŞİV" SEKMESİ EKLENDİ) ---
             tab1, tab2, tab3, tab4 = st.tabs(["🤖 AI Rapor", "📈 Grafikler", "📝 Veriler", "🗄️ Rapor Arşivi"])
-            
             with tab1:
                 if st.button("Rapor Oluştur ve Arşivle"):
-                    with st.spinner("Analiz ediliyor ve arşivleniyor..."):
+                    with st.spinner("Analiz ediliyor..."):
                         yorum_listesi = [str(y) for y in df_filtered['Yorum'] if str(y).strip()]
                         if not yorum_listesi:
                             st.warning("Yorum yok.")
@@ -297,36 +353,28 @@ elif page_mode == "Yönetici Paneli":
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
                             analiz = analyze_comments_with_ai(text_data, stats, role="admin", model_name=selected_model)
-                            
                             st.markdown(analiz)
-                            
-                            # ARŞİVLEME İŞLEMİ
                             save_ai_log(scope=filtre_tarih, role="admin", model=selected_model, report_text=analiz)
-                            st.success("Rapor başarıyla 'ai_arsiv' sayfasına kaydedildi!")
-
+                            st.success("Arşivlendi!")
             with tab2:
                 st.bar_chart(df_filtered[['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']].mean())
                 if 'Begenilen_Yemek' in df_filtered.columns:
                     st.write("En Beğenilenler:")
                     st.bar_chart(df_filtered['Begenilen_Yemek'].value_counts().head(5))
-            
             with tab3:
                 st.write("Düşük puanlar kırmızı, yüksek puanlar yeşil görünür.")
                 st.dataframe(df_filtered.style.map(color_dataframe_cells, subset=['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']))
-            
             with tab4:
                 st.subheader("🗄️ Geçmiş AI Raporları")
                 arsiv_df = get_ai_logs()
                 if not arsiv_df.empty:
-                    # En son rapor en üstte görünsün
                     arsiv_df = arsiv_df.sort_values(by="Zaman", ascending=False)
                     for index, row in arsiv_df.iterrows():
                         with st.expander(f"{row['Zaman']} - {row['Kapsam']} ({row['Role']})"):
                             st.caption(f"Model: {row['Model']}")
                             st.markdown(row['Rapor_Icerigi'])
                 else:
-                    st.info("Henüz arşivlenmiş rapor yok.")
-
+                    st.info("Arşiv boş.")
         else:
             st.warning("Veri yok.")
 
@@ -338,7 +386,6 @@ elif page_mode == "Yönetici Paneli":
             df_today = df[df['Zaman'].dt.date == now.date()]
             if not df_today.empty:
                 st.subheader(f"📅 Bugünün ({now.strftime('%d.%m.%Y')}) Karnesi")
-                
                 k1, k2, k3 = st.columns(3)
                 with k1: display_colored_metric("😋 Lezzet", df_today['Puan_Lezzet'].mean())
                 with k2: display_colored_metric("🧼 Temizlik", df_today['Puan_Hijyen'].mean())
@@ -350,7 +397,6 @@ elif page_mode == "Yönetici Paneli":
                     </div>
                     """
                     st.markdown(html_chef_total, unsafe_allow_html=True)
-
                 st.divider()
                 if st.button("Günün Özetini Oku (AI)"):
                     with st.spinner("Hazırlanıyor..."):
@@ -361,9 +407,7 @@ elif page_mode == "Yönetici Paneli":
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet Puanı: {df_today['Puan_Lezzet'].mean():.1f}"
                             ozet = analyze_comments_with_ai(text_data, stats, role="cook", model_name="gemini-2.5-flash")
-                            
                             st.info(ozet)
-                            # Aşçı raporlarını da arşivleyelim
                             save_ai_log(scope="Bugün", role="cook", model="gemini-2.5-flash", report_text=ozet)
             else:
                 st.info("Bugün veri yok.")
