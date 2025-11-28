@@ -178,8 +178,7 @@ def color_dataframe_cells(val):
         else: return 'color: #FFA500; font-weight: bold'
     return ''
 
-# --- COOKIE MANAGER (BAŞLATMA) ---
-# key parametresi ile yöneticinin yeniden render edilmesini sağlarız
+# --- COOKIE MANAGER ---
 cookie_manager = stx.CookieManager(key="cookie_manager")
 
 # --- ARAYÜZ (UI) ---
@@ -187,7 +186,7 @@ cookie_manager = stx.CookieManager(key="cookie_manager")
 page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Paneli"])
 
 # --------------------------
-# 🎓 ÖĞRENCİ EKRANI (ZAMAN AYARLI + ÇEREZ KORUMALI)
+# 🎓 ÖĞRENCİ EKRANI
 # --------------------------
 if page_mode == "Öğrenci Ekranı":
     st.title("🍽️ LezzetMetre")
@@ -202,19 +201,13 @@ if page_mode == "Öğrenci Ekranı":
         st.success(f"🍽️ Şu an **{aktif_ogun}** değerlendirmesi açık.")
         ogun = aktif_ogun
         
-        # --- ÇEREZ KONTROLÜ ---
-        # Her gün ve her öğün için benzersiz bir damga ismi oluşturuyoruz
-        # Örn: "vote_01.12.2025_OGLE"
         unique_vote_id = f"vote_{tarih_gosterim}_{ogun}"
-        
-        # Tarayıcıda bu damga var mı diye bak
         has_voted = cookie_manager.get(unique_vote_id)
         
         if has_voted:
             st.warning("✅ **Bu öğün için oyunu zaten kullandın.**")
             st.markdown("Katılımın için teşekkürler! Bir sonraki öğünde görüşmek üzere.")
         else:
-            # Oy kullanmamışsa formu göster
             menu_data = get_todays_menu()
             if menu_data is None:
                 st.error(f"⚠️ {tarih_gosterim} tarihi için menü bulunamadı.")
@@ -260,11 +253,10 @@ if page_mode == "Öğrenci Ekranı":
                         zaman_damgasi = anlik_tr.strftime("%Y-%m-%d %H:%M:%S")
                         kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
                         
-                        # Sheets'e kaydet
                         save_feedback(kayit)
                         
-                        # Çerezi (Damgayı) Bas - 1 gün geçerli olsun
-                        cookie_manager.set(unique_vote_id, "true", expires_at=datetime.now() + timedelta(days=1))
+                        # --- DÜZELTİLDİ: expires_at parametresi kaldırıldı ---
+                        cookie_manager.set(unique_vote_id, "true")
                         
                         st.balloons()
                         st.success("Kaydedildi! Sayfa yenilendiğinde tekrar oy kullanamayacaksın.")
