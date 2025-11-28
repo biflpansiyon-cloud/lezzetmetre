@@ -38,25 +38,70 @@ def parse_yemek_listesi(hucre_verisi):
     return yemekler
 
 def get_todays_menu():
-    """Google Sheets'ten bugünün menüsünü çeker."""
+    """Google Sheets'ten bugünün menüsünü BLOK mantığıyla çeker."""
     client = get_google_sheet_client()
     sheet = client.open("Pansiyon_Yemek_DB").worksheet("aktif_menu")
     
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
+    # Tüm veriyi liste listesi olarak çek (Pandas kullanmıyoruz, manuel işleyeceğiz)
+    # Bu yöntem merged (birleşik) hücrelerde daha güvenlidir.
+    all_values = sheet.get_all_values()
     
-    # Bugünün tarihini bul (Format: 1.12.2025)
-    bugun = datetime.now()
-    tarih_format = f"{bugun.day}.{bugun.month}.{bugun.year}"
+    # Bugünün tarihini hazırla (1.12.2025 formatında - başında sıfır olmayabilir dikkat)
+    # Senin Excel'deki formatın "1.12.2025" ise Python'da lstrip('0') ile baştaki 0'ı atarız.
+    now = datetime.now()
+    bugun = f"{now.day}.{now.month}.{now.year}" 
+    # Not: Eğer excelde 01.12.2025 ise: f"{now.day:02d}.{now.month:02d}.{now.year}" yapmalıyız.
+    # Senin resimde 1.12.2025 görünüyor, o yüzden üstteki doğru.
+
+    target_row_index = -1
     
-    # Tarih sütununu string yaparak ara (Excel format hatasını önler)
-    df['TARİH'] = df['TARİH'].astype(str)
-    
-    gunluk_menu = df[df['TARİH'] == tarih_format]
-    
-    if gunluk_menu.empty:
+    # 1. TARİHİ BUL
+    # Tabloyu satır satır gez
+    for i, row in enumerate(all_values):
+        # row[0] -> Tarih sütunu
+        if row[0] == bugun:
+            target_row_index = i
+            break
+            
+    if target_row_index == -1:
         return None
-    return gunluk_menu.iloc[0]
+
+    # 2. 4 SATIRLIK BLOĞU OKU
+    # Tablonun yapısı: Tarih bulununca o satır ve altındaki 3 satır (toplam 4) o güne aittir.
+    
+    # Sütun İndeksleri (A=0, B=1, C=2, D=3, E=4, F=5)
+    # KAHVALTI: C sütunu (index 2) - Merged olduğu için sadece ilk satırda veri vardır.
+    # ÖĞLE: D sütunu (index 3) - 4 satırın hepsinde veri var.
+    # AKŞAM: E sütunu (index 4) - 4 satırın hepsinde veri var.
+    # ARA ÖĞÜN: F sütunu (index 5) - Merged.
+    
+    # Güvenlik önlemi: Listenin sonuna gelmemek için kontrol
+    limit = min(target_row_index + 4, len(all_values))
+    
+    kahvalti_raw = all_values[target_row_index][2] # Sadece ilk satır yeterli
+    ara_ogun_raw = all_values[target_row_index][5] # Sadece ilk satır yeterli
+    
+    ogle_listesi = []
+    aksam_listesi = []
+    
+    for r in range(target_row_index, limit):
+        # Öğle yemeği hücresini al (Boş değilse listeye ekle)
+        val_ogle = all_values[r][3].strip()
+        if val_ogle:
+            ogle_listesi.append(val_ogle)
+            
+        # Akşam yemeği hücresini al
+        val_aksam = all_values[r][4].strip()
+        if val_aksam:
+            aksam_listesi.append(val_aksam)
+
+    # 3. VERİYİ SÖZLÜK OLARAK DÖNDÜR
+    return {
+        "KAHVALTI": kahvalti_raw,     # Tek metin (içinde alt+enter olabilir)
+        "ÖĞLE": "\n".join(ogle_listesi), # Listeyi stringe çevir (frontend parse edecek)
+        "AKŞAM": "\n".join(aksam_listesi),
+        "ARA ÖĞÜN": ara_ogun_raw
+    }
 
 def save_feedback(data_list):
     client = get_google_sheet_client()
