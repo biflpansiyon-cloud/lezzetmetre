@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, time
 import google.generativeai as genai
 import re
 import pytz
+import extra_streamlit_components as stx # Çerez (Cookie) kütüphanesi
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -131,15 +132,14 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
         model = genai.GenerativeModel('gemini-1.5-flash')
 
     if role == "cook":
-        # --- DÜZELTME BURADA YAPILDI ---
         prompt = f"""
         Sen bir mutfak şefisin. Verileri ekibine aktarıyorsun.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
         
         GÖREVİN: 
-        Ekibe "Değerli Ustalarım" veya "Şefim" diye hitap et. 
-        ASLA "Ustamlar" kelimesini kullanma, bu yanlış bir ifadedir.
+        Ekibe "Değerli Ustalarım" veya "Arkadaşlar" diye hitap et. 
+        ASLA "Ustamlar" kelimesini kullanma.
         Kısa, samimi, paragraf şeklinde konuşma hazırla. İyileri öv, kötüleri yapıcı uyar.
         """
     else:
@@ -178,15 +178,19 @@ def color_dataframe_cells(val):
         else: return 'color: #FFA500; font-weight: bold'
     return ''
 
+# --- COOKIE MANAGER (BAŞLATMA) ---
+# key parametresi ile yöneticinin yeniden render edilmesini sağlarız
+cookie_manager = stx.CookieManager(key="cookie_manager")
+
 # --- ARAYÜZ (UI) ---
 
 page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Paneli"])
 
 # --------------------------
-# 🎓 ÖĞRENCİ EKRANI
+# 🎓 ÖĞRENCİ EKRANI (ZAMAN AYARLI + ÇEREZ KORUMALI)
 # --------------------------
 if page_mode == "Öğrenci Ekranı":
-    st.title("🍽️ BİFL LezzetMetre")
+    st.title("🍽️ LezzetMetre")
     anlik_tr = get_turkey_time()
     tarih_gosterim = anlik_tr.strftime("%d.%m.%Y")
     saat_gosterim = anlik_tr.strftime("%H:%M")
@@ -197,51 +201,74 @@ if page_mode == "Öğrenci Ekranı":
     if aktif_ogun:
         st.success(f"🍽️ Şu an **{aktif_ogun}** değerlendirmesi açık.")
         ogun = aktif_ogun
-        menu_data = get_todays_menu()
-        if menu_data is None:
-            st.error(f"⚠️ {tarih_gosterim} tarihi için menü bulunamadı.")
-            st.caption("İdare ile görüşünüz.")
+        
+        # --- ÇEREZ KONTROLÜ ---
+        # Her gün ve her öğün için benzersiz bir damga ismi oluşturuyoruz
+        # Örn: "vote_01.12.2025_OGLE"
+        unique_vote_id = f"vote_{tarih_gosterim}_{ogun}"
+        
+        # Tarayıcıda bu damga var mı diye bak
+        has_voted = cookie_manager.get(unique_vote_id)
+        
+        if has_voted:
+            st.warning("✅ **Bu öğün için oyunu zaten kullandın.**")
+            st.markdown("Katılımın için teşekkürler! Bir sonraki öğünde görüşmek üzere.")
         else:
-            raw_menu_text = menu_data.get(ogun, "")
-            yemekler = parse_yemek_listesi(raw_menu_text)
-            with st.form("oylama_formu"):
-                if ogun in ["ÖĞLE", "AKŞAM"]:
-                    st.markdown("### 🍲 Menüde Ne Var?")
-                    if yemekler:
-                        for y in yemekler: st.success(f"• {y}")
-                    else: st.warning("Menü bilgisi girilmemiş.")
-                elif ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
-                    st.markdown(f"**{ogun} İçeriği:**")
-                    if yemekler: st.info(", ".join(yemekler))
-                st.write("---")
-                if ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
-                    c1, c2, c3 = st.columns(3)
-                    with c1: puan_lezzet = st.slider("😋 Lezzet", 1, 5, 3)
-                    with c2: puan_hijyen = st.slider("🧼 Hijyen", 1, 5, 3)
-                    with c3: puan_servis = st.slider("💁‍♂️ Servis", 1, 5, 3)
-                    begenilen, sikayet = "", ""
-                else:
-                    st.write("#### Puanlaman:")
-                    c1, c2, c3 = st.columns(3)
-                    with c1: puan_lezzet = st.selectbox("😋 Lezzet", [1,2,3,4,5], index=2)
-                    with c2: puan_hijyen = st.selectbox("🧼 Hijyen", [1,2,3,4,5], index=2)
-                    with c3: puan_servis = st.selectbox("💁‍♂️ Servis", [1,2,3,4,5], index=2)
-                    if yemekler:
-                        st.write("#### Detaylar (Opsiyonel):")
-                        col_a, col_b = st.columns(2)
-                        with col_a: begenilen = st.selectbox("🏆 En Beğendiğin?", ["Seçim Yok"] + yemekler)
-                        with col_b: sikayet = st.selectbox("👎 Sorunlu Olan?", ["Seçim Yok"] + yemekler)
-                    else: begenilen, sikayet = "", ""
-                yorum = st.text_area("Eklemek istediklerin:", placeholder="Fikrin bizim için değerli...")
-                submit = st.form_submit_button("GÖNDER 🚀")
-                if submit:
-                    if begenilen == "Seçim Yok": begenilen = ""
-                    if sikayet == "Seçim Yok": sikayet = ""
-                    zaman_damgasi = anlik_tr.strftime("%Y-%m-%d %H:%M:%S")
-                    kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
-                    save_feedback(kayit)
-                    st.balloons()
-                    st.success("Kaydedildi!")
+            # Oy kullanmamışsa formu göster
+            menu_data = get_todays_menu()
+            if menu_data is None:
+                st.error(f"⚠️ {tarih_gosterim} tarihi için menü bulunamadı.")
+                st.caption("İdare ile görüşünüz.")
+            else:
+                raw_menu_text = menu_data.get(ogun, "")
+                yemekler = parse_yemek_listesi(raw_menu_text)
+                with st.form("oylama_formu"):
+                    if ogun in ["ÖĞLE", "AKŞAM"]:
+                        st.markdown("### 🍲 Menüde Ne Var?")
+                        if yemekler:
+                            for y in yemekler: st.success(f"• {y}")
+                        else: st.warning("Menü bilgisi girilmemiş.")
+                    elif ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
+                        st.markdown(f"**{ogun} İçeriği:**")
+                        if yemekler: st.info(", ".join(yemekler))
+                    st.write("---")
+                    if ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
+                        c1, c2, c3 = st.columns(3)
+                        with c1: puan_lezzet = st.slider("😋 Lezzet", 1, 5, 3)
+                        with c2: puan_hijyen = st.slider("🧼 Hijyen", 1, 5, 3)
+                        with c3: puan_servis = st.slider("💁‍♂️ Servis", 1, 5, 3)
+                        begenilen, sikayet = "", ""
+                    else:
+                        st.write("#### Puanlaman:")
+                        c1, c2, c3 = st.columns(3)
+                        with c1: puan_lezzet = st.selectbox("😋 Lezzet", [1,2,3,4,5], index=2)
+                        with c2: puan_hijyen = st.selectbox("🧼 Hijyen", [1,2,3,4,5], index=2)
+                        with c3: puan_servis = st.selectbox("💁‍♂️ Servis", [1,2,3,4,5], index=2)
+                        if yemekler:
+                            st.write("#### Detaylar (Opsiyonel):")
+                            col_a, col_b = st.columns(2)
+                            with col_a: begenilen = st.selectbox("🏆 En Beğendiğin?", ["Seçim Yok"] + yemekler)
+                            with col_b: sikayet = st.selectbox("👎 Sorunlu Olan?", ["Seçim Yok"] + yemekler)
+                        else: begenilen, sikayet = "", ""
+                    
+                    yorum = st.text_area("Eklemek istediklerin:", placeholder="Fikrin bizim için değerli...")
+                    submit = st.form_submit_button("GÖNDER 🚀")
+                    
+                    if submit:
+                        if begenilen == "Seçim Yok": begenilen = ""
+                        if sikayet == "Seçim Yok": sikayet = ""
+                        zaman_damgasi = anlik_tr.strftime("%Y-%m-%d %H:%M:%S")
+                        kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
+                        
+                        # Sheets'e kaydet
+                        save_feedback(kayit)
+                        
+                        # Çerezi (Damgayı) Bas - 1 gün geçerli olsun
+                        cookie_manager.set(unique_vote_id, "true", expires_at=datetime.now() + timedelta(days=1))
+                        
+                        st.balloons()
+                        st.success("Kaydedildi! Sayfa yenilendiğinde tekrar oy kullanamayacaksın.")
+                        
     else:
         st.warning("⛔ **Şu an aktif bir yemek saati değil.**")
         st.markdown("""
