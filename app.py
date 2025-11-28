@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, time
 import google.generativeai as genai
 import re
 import pytz
-import extra_streamlit_components as stx # Çerez (Cookie) kütüphanesi
+import extra_streamlit_components as stx
+import unicodedata # Türkçe karakter temizliği için
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -26,14 +27,20 @@ except Exception as e:
 
 # --- YARDIMCI FONKSİYONLAR ---
 
+def sanitize_cookie_name(text):
+    """Çerez ismindeki Türkçe karakterleri ve noktaları temizler."""
+    # Türkçe karakterleri İngilizceye çevir
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
+    # Nokta, boşluk ve tireleri alt çizgi yap veya sil
+    text = text.replace(".", "").replace(" ", "_").replace("-", "_").upper()
+    return text
+
 def get_turkey_time():
-    """Sunucu saati ne olursa olsun Türkiye saatini döndürür."""
     utc_now = datetime.now(pytz.utc)
     turkey_tz = pytz.timezone('Europe/Istanbul')
     return utc_now.astimezone(turkey_tz)
 
 def get_active_meal(current_time):
-    """Şu anki saate göre aktif öğünü belirler."""
     if time(7, 0) <= current_time <= time(8, 20):
         return "KAHVALTI"
     elif time(12, 0) <= current_time <= time(14, 30):
@@ -136,7 +143,6 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
         Sen bir mutfak şefisin. Verileri ekibine aktarıyorsun.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
-        
         GÖREVİN: 
         Ekibe "Değerli Ustalarım" veya "Arkadaşlar" diye hitap et. 
         ASLA "Ustamlar" kelimesini kullanma.
@@ -185,9 +191,6 @@ cookie_manager = stx.CookieManager(key="cookie_manager")
 
 page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Paneli"])
 
-# --------------------------
-# 🎓 ÖĞRENCİ EKRANI
-# --------------------------
 if page_mode == "Öğrenci Ekranı":
     st.title("🍽️ LezzetMetre")
     anlik_tr = get_turkey_time()
@@ -201,8 +204,12 @@ if page_mode == "Öğrenci Ekranı":
         st.success(f"🍽️ Şu an **{aktif_ogun}** değerlendirmesi açık.")
         ogun = aktif_ogun
         
-        unique_vote_id = f"vote_{tarih_gosterim}_{ogun}"
-        has_voted = cookie_manager.get(unique_vote_id)
+        # --- DÜZELTME: Çerez ismini güvenli hale getir ---
+        # "vote_29.11.2025_ÖĞLE" -> "VOTE_29112025_OGLE" olacak
+        raw_cookie_name = f"vote_{tarih_gosterim}_{ogun}"
+        safe_cookie_id = sanitize_cookie_name(raw_cookie_name)
+        
+        has_voted = cookie_manager.get(safe_cookie_id)
         
         if has_voted:
             st.warning("✅ **Bu öğün için oyunu zaten kullandın.**")
@@ -255,8 +262,8 @@ if page_mode == "Öğrenci Ekranı":
                         
                         save_feedback(kayit)
                         
-                        # --- DÜZELTİLDİ: expires_at parametresi kaldırıldı ---
-                        cookie_manager.set(unique_vote_id, "true")
+                        # --- Çerez Kaydı (Keyword argument ile güvenli) ---
+                        cookie_manager.set(cookie=safe_cookie_id, val="true")
                         
                         st.balloons()
                         st.success("Kaydedildi! Sayfa yenilendiğinde tekrar oy kullanamayacaksın.")
@@ -271,9 +278,6 @@ if page_mode == "Öğrenci Ekranı":
         * 🍪 **Ara Öğün:** 21:15 - 22:00
         """)
 
-# --------------------------
-# 🔐 YÖNETİCİ PANELİ
-# --------------------------
 elif page_mode == "Yönetici Paneli":
     st.sidebar.title("🔐 Giriş Paneli")
     pwd = st.sidebar.text_input("Şifre", type="password")
@@ -288,10 +292,8 @@ elif page_mode == "Yönetici Paneli":
     except:
         df = pd.DataFrame()
 
-    # --- ROL: SÜPER ADMIN ---
     if pwd == ADMIN_PWD:
         st.title("📊 Süper Admin Paneli")
-        
         st.sidebar.markdown("---")
         st.sidebar.subheader("🤖 AI Model Seçimi")
         available_models = get_available_gemini_models()
@@ -305,7 +307,6 @@ elif page_mode == "Yönetici Paneli":
         if not df.empty:
             filtre_secenekleri = ["Bugün", "Son 7 Gün", "Son 30 Gün", "Son 6 Ay", "Tüm Kayıtlar"]
             filtre_tarih = st.radio("Zaman Aralığı", filtre_secenekleri, horizontal=True)
-            
             now = datetime.now()
             if filtre_tarih == "Bugün":
                 df_filtered = df[df['Zaman'].dt.date == now.date()]
@@ -368,7 +369,6 @@ elif page_mode == "Yönetici Paneli":
         else:
             st.warning("Veri yok.")
 
-    # --- ROL: AŞÇI ---
     elif pwd == CHEF_PWD:
         st.title("👨‍🍳 Mutfak Ekibi Paneli")
         if not df.empty:
