@@ -138,7 +138,7 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
         ÖĞRENCİ YORUMLARI: {comments_text}
         
         GÖREVİN: 
-        Ekibe "Değerli Ustalarım" veya "Arkadaşlar" diye hitap et. 
+        Ekibe "Değerli Ustalarım" veya "Şefim" diye hitap et. 
         ASLA "Ustamlar" kelimesini kullanma, bu yanlış bir ifadedir.
         Kısa, samimi, paragraf şeklinde konuşma hazırla. İyileri öv, kötüleri yapıcı uyar.
         """
@@ -186,7 +186,7 @@ page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Pan
 # 🎓 ÖĞRENCİ EKRANI
 # --------------------------
 if page_mode == "Öğrenci Ekranı":
-    st.title("🍽️ LezzetMetre")
+    st.title("🍽️ BİFL LezzetMetre")
     anlik_tr = get_turkey_time()
     tarih_gosterim = anlik_tr.strftime("%d.%m.%Y")
     saat_gosterim = anlik_tr.strftime("%H:%M")
