@@ -8,7 +8,7 @@ import re
 import pytz
 import extra_streamlit_components as stx
 import unicodedata
-import time # YENİ: Bekleme süresi için eklendi
+import time as pytime # Zaman bekleme (sleep) için ismi değiştirdik çakışmasın diye
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -29,7 +29,6 @@ except Exception as e:
 # --- YARDIMCI FONKSİYONLAR ---
 
 def sanitize_cookie_name(text):
-    """Çerez ismindeki Türkçe karakterleri ve noktaları temizler."""
     text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
     text = text.replace(".", "").replace(" ", "_").replace("-", "_").upper()
     return text
@@ -40,6 +39,10 @@ def get_turkey_time():
     return utc_now.astimezone(turkey_tz)
 
 def get_active_meal(current_time):
+    """Şu anki saate göre aktif öğünü belirler."""
+    # --- KRİTİK DÜZELTME: Saat dilimi bilgisini kaldırıyoruz ---
+    current_time = current_time.replace(tzinfo=None)
+    
     if time(7, 0) <= current_time <= time(8, 20):
         return "KAHVALTI"
     elif time(12, 0) <= current_time <= time(14, 30):
@@ -258,16 +261,14 @@ if page_mode == "Öğrenci Ekranı":
                         kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
                         
                         save_feedback(kayit)
-                        
-                        # Çerezi Bas
                         cookie_manager.set(safe_cookie_id, "true")
                         
                         st.balloons()
-                        st.success("Kaydedildi! Yönlendiriliyorsunuz...")
+                        st.success("Kaydedildi! Sayfa yenileniyor...")
                         
-                        # --- OTOMATİK YENİLEME ---
-                        time.sleep(2) # 2 saniye balonları görsün
-                        st.rerun()    # Sayfayı yenile ve kilit ekranını aç
+                        # Otomatik Yenileme
+                        pytime.sleep(2)
+                        st.rerun()
                         
     else:
         st.warning("⛔ **Şu an aktif bir yemek saati değil.**")
