@@ -8,7 +8,8 @@ import re
 import pytz
 import extra_streamlit_components as stx
 import unicodedata
-import time as pytime # Zaman bekleme (sleep) için ismi değiştirdik çakışmasın diye
+import time as pytime 
+import uuid # EKLENDİ: Benzersiz kimlik oluşturmak için
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -40,7 +41,6 @@ def get_turkey_time():
 
 def get_active_meal(current_time):
     """Şu anki saate göre aktif öğünü belirler."""
-    # --- KRİTİK DÜZELTME: Saat dilimi bilgisini kaldırıyoruz ---
     current_time = current_time.replace(tzinfo=None)
     
     if time(7, 0) <= current_time <= time(8, 20):
@@ -195,6 +195,17 @@ page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Pan
 
 if page_mode == "Öğrenci Ekranı":
     st.title("🍽️ LezzetMetre")
+    
+    # --- CİHAZ ID YÖNETİMİ (YENİ EKLENEN KISIM) ---
+    device_id = cookie_manager.get("lezzetmetre_device_id")
+    if not device_id:
+        # Eğer çerez yoksa yeni bir ID oluştur
+        device_id = str(uuid.uuid4())
+        # Çerezi 1 yıl (365 gün) süreyle sakla
+        cookie_manager.set("lezzetmetre_device_id", device_id, expires_at=datetime.now() + timedelta(days=365))
+        # Not: Cookie set edildikten sonra hemen okunamazsa diye değişkeni kullanmaya devam ediyoruz.
+    # ---------------------------------------------
+
     anlik_tr = get_turkey_time()
     tarih_gosterim = anlik_tr.strftime("%d.%m.%Y")
     saat_gosterim = anlik_tr.strftime("%H:%M")
@@ -258,7 +269,10 @@ if page_mode == "Öğrenci Ekranı":
                         if begenilen == "Seçim Yok": begenilen = ""
                         if sikayet == "Seçim Yok": sikayet = ""
                         zaman_damgasi = anlik_tr.strftime("%Y-%m-%d %H:%M:%S")
-                        kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet]
+                        
+                        # --- VERİ KAYDINA CİHAZ ID EKLENDİ ---
+                        kayit = [zaman_damgasi, tarih_gosterim, ogun, puan_lezzet, puan_hijyen, puan_servis, yorum, begenilen, sikayet, device_id]
+                        # -------------------------------------
                         
                         save_feedback(kayit)
                         cookie_manager.set(safe_cookie_id, "true")
@@ -356,6 +370,7 @@ elif page_mode == "Yönetici Paneli":
                     st.write("En Beğenilenler:")
                     st.bar_chart(df_filtered['Begenilen_Yemek'].value_counts().head(5))
             with tab3:
+                # Veri tablosunda Cihaz_ID'yi göstermek isteyebilirsin, şimdilik tüm sütunları gösteriyor
                 st.dataframe(df_filtered.style.map(color_dataframe_cells, subset=['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']))
             with tab4:
                 st.subheader("🗄️ Geçmiş AI Raporları")
