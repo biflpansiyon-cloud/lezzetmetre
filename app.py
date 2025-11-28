@@ -7,7 +7,8 @@ import google.generativeai as genai
 import re
 import pytz
 import extra_streamlit_components as stx
-import unicodedata # Türkçe karakter temizliği için
+import unicodedata
+import time # YENİ: Bekleme süresi için eklendi
 
 # --- AYARLAR VE BAĞLANTILAR ---
 st.set_page_config(page_title="LezzetMetre", page_icon="🍽️", layout="wide")
@@ -29,9 +30,7 @@ except Exception as e:
 
 def sanitize_cookie_name(text):
     """Çerez ismindeki Türkçe karakterleri ve noktaları temizler."""
-    # Türkçe karakterleri İngilizceye çevir
     text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('utf-8')
-    # Nokta, boşluk ve tireleri alt çizgi yap veya sil
     text = text.replace(".", "").replace(" ", "_").replace("-", "_").upper()
     return text
 
@@ -204,8 +203,6 @@ if page_mode == "Öğrenci Ekranı":
         st.success(f"🍽️ Şu an **{aktif_ogun}** değerlendirmesi açık.")
         ogun = aktif_ogun
         
-        # --- DÜZELTME: Çerez ismini güvenli hale getir ---
-        # "vote_29.11.2025_ÖĞLE" -> "VOTE_29112025_OGLE" olacak
         raw_cookie_name = f"vote_{tarih_gosterim}_{ogun}"
         safe_cookie_id = sanitize_cookie_name(raw_cookie_name)
         
@@ -262,11 +259,15 @@ if page_mode == "Öğrenci Ekranı":
                         
                         save_feedback(kayit)
                         
-                        # --- Çerez Kaydı (Keyword argument ile güvenli) ---
-                        cookie_manager.set(cookie=safe_cookie_id, val="true")
+                        # Çerezi Bas
+                        cookie_manager.set(safe_cookie_id, "true")
                         
                         st.balloons()
-                        st.success("Kaydedildi! Sayfa yenilendiğinde tekrar oy kullanamayacaksın.")
+                        st.success("Kaydedildi! Yönlendiriliyorsunuz...")
+                        
+                        # --- OTOMATİK YENİLEME ---
+                        time.sleep(2) # 2 saniye balonları görsün
+                        st.rerun()    # Sayfayı yenile ve kilit ekranını aç
                         
     else:
         st.warning("⛔ **Şu an aktif bir yemek saati değil.**")
