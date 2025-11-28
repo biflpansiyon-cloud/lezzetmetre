@@ -75,11 +75,17 @@ def get_all_feedback():
     df = pd.DataFrame(data)
     return df
 
-def analyze_comments_with_ai(comments_text, stats_text, role="admin"):
-    """Gemini ile yorumları analiz eder. Hata korumalıdır."""
-    # YENİ: Daha hızlı ve kararlı model
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
+def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name="gemini-1.5-flash"):
+    """
+    Gemini ile yorumları analiz eder.
+    model_name: Kullanıcının seçtiği model (varsayılan: gemini-2.5-flash)
+    """
+    try:
+        model = genai.GenerativeModel(model_name)
+    except:
+        # Eğer seçilen modelde sorun varsa güvenli limana (flash) dön
+        model = genai.GenerativeModel('gemini-2.5-flash')
+
     if role == "cook":
         prompt = f"""
         Sen bir mutfak şefisin. Aşağıdaki verileri ekibine sözlü olarak aktarıyorsun.
@@ -109,7 +115,7 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin"):
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"⚠️ AI Analiz Hatası: {str(e)}"
+        return f"⚠️ AI Analiz Hatası ({model_name}): {str(e)}"
 
 # --- ARAYÜZ (UI) ---
 
@@ -180,7 +186,7 @@ if page_mode == "Öğrenci Ekranı":
                     st.success("Görüşün başarıyla kaydedildi! Teşekkürler.")
 
 # --------------------------
-# 🔐 YÖNETİCİ PANELİ (GÜVENLİ & HATA KORUMALI)
+# 🔐 YÖNETİCİ PANELİ
 # --------------------------
 elif page_mode == "Yönetici Paneli":
     st.sidebar.title("🔐 Giriş Paneli")
@@ -202,6 +208,25 @@ elif page_mode == "Yönetici Paneli":
         st.title("📊 Süper Admin Paneli")
         st.success("Yönetici girişi yapıldı.")
         
+        # --- MODEL SEÇİMİ (YENİ) ---
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🤖 AI Ayarları")
+        
+        # Kullanılabilir modeller listesi (Gelecekte buraya yenilerini ekleyebilirsin)
+        available_models = [
+            "gemini-1.5-flash", # Hızlı, ucuz, varsayılan
+            "gemini-1.5-pro",   # Daha zeki ama biraz daha yavaş
+            "gemini-pro"        # Eski sürüm (Yedek)
+        ]
+        
+        selected_model = st.sidebar.selectbox(
+            "Kullanılacak Yapay Zeka Modeli", 
+            available_models,
+            index=0 # Varsayılan olarak Flash seçili gelir
+        )
+        st.sidebar.info(f"Seçili Model: **{selected_model}**")
+        # ---------------------------
+
         if not df.empty:
             filtre_tarih = st.radio("Zaman Aralığı", ["Bugün", "Son 7 Gün", "Tüm Kayıtlar"], horizontal=True)
             now = datetime.now()
@@ -224,9 +249,9 @@ elif page_mode == "Yönetici Paneli":
             tab1, tab2, tab3 = st.tabs(["🤖 Detaylı AI Rapor", "📈 Grafikler", "📝 Tüm Veriler"])
             
             with tab1:
+                st.caption(f"Analiz **{selected_model}** modeli kullanılarak yapılıyor.")
                 if st.button("Rapor Oluştur"):
                     with st.spinner("Analiz ediliyor..."):
-                        # Yorumları topla (Boş olmayanları)
                         yorum_listesi = [str(y) for y in df_filtered['Yorum'] if str(y).strip()]
                         
                         if not yorum_listesi:
@@ -234,7 +259,9 @@ elif page_mode == "Yönetici Paneli":
                         else:
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
-                            analiz = analyze_comments_with_ai(text_data, stats, role="admin")
+                            
+                            # Seçilen modeli fonksiyona gönderiyoruz
+                            analiz = analyze_comments_with_ai(text_data, stats, role="admin", model_name=selected_model)
                             st.markdown(analiz)
 
             with tab2:
@@ -277,7 +304,8 @@ elif page_mode == "Yönetici Paneli":
                         else:
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet Puanı: {lezzet_puan:.1f}"
-                            ozet = analyze_comments_with_ai(text_data, stats, role="cook")
+                            # Aşçılar için varsayılan (en hızlı) modeli kullanıyoruz
+                            ozet = analyze_comments_with_ai(text_data, stats, role="cook", model_name="gemini-1.5-flash")
                             st.info(ozet)
             else:
                 st.info("Bugün henüz veri girişi yok.")
