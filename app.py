@@ -24,6 +24,21 @@ except Exception as e:
 
 # --- YARDIMCI FONKSİYONLAR ---
 
+def get_available_gemini_models():
+    """Google hesabında tanımlı, içerik üretebilen TÜM modelleri canlı çeker."""
+    try:
+        model_list = []
+        for m in genai.list_models():
+            # Sadece metin üretebilen modelleri al (generateContent destekleyenler)
+            if 'generateContent' in m.supported_generation_methods:
+                # Model isminin başındaki 'models/' kısmını temizle
+                clean_name = m.name.split("/")[-1]
+                model_list.append(clean_name)
+        return sorted(model_list, reverse=True) # En yeni versiyonlar üste gelsin diye ters sırala
+    except Exception as e:
+        # API bağlantısında sorun olursa manuel yedek liste dönsün
+        return ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+
 def parse_yemek_listesi(hucre_verisi):
     if not hucre_verisi: return []
     text = str(hucre_verisi)
@@ -75,36 +90,27 @@ def get_all_feedback():
     df = pd.DataFrame(data)
     return df
 
-def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name="gemini-1.5-flash"):
-    """
-    Gemini ile yorumları analiz eder.
-    model_name: Kullanıcının seçtiği model (varsayılan: gemini-2.5-flash)
-    """
+def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name="gemini-2.5-flash"):
+    """Seçilen model ile analiz yapar."""
     try:
         model = genai.GenerativeModel(model_name)
     except:
-        # Eğer seçilen modelde sorun varsa güvenli limana (flash) dön
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Eğer model adında hata varsa en yakını dener
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
     if role == "cook":
         prompt = f"""
-        Sen bir mutfak şefisin. Aşağıdaki verileri ekibine sözlü olarak aktarıyorsun.
+        Sen bir mutfak şefisin. Verileri ekibine aktarıyorsun.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
-        
-        GÖREVİN:
-        Kısa, samimi, "Ustam" diye hitap eden bir konuşma hazırla.
-        1. İyileri öv.
-        2. Kötüleri yapıcı bir dille uyar.
-        3. Asla madde işareti kullanma, paragraf olarak yaz.
+        GÖREVİN: "Ustam" diye hitap eden, kısa, samimi, madde imi kullanmayan, paragraf şeklinde bir konuşma hazırla. İyileri öv, kötüleri yapıcı uyar.
         """
     else:
         prompt = f"""
         Sen bir gıda mühendisisin.
         İSTATİSTİKLER: {stats_text}
         ÖĞRENCİ YORUMLARI: {comments_text}
-        
-        Kısa ve net bir yönetici özeti çıkar:
+        RAPOR FORMATI:
         1. **Genel Durum:**
         2. **Pozitifler:**
         3. **Negatifler:**
@@ -115,7 +121,7 @@ def analyze_comments_with_ai(comments_text, stats_text, role="admin", model_name
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"⚠️ AI Analiz Hatası ({model_name}): {str(e)}"
+        return f"⚠️ Hata ({model_name}): {str(e)}"
 
 # --- ARAYÜZ (UI) ---
 
@@ -126,13 +132,11 @@ page_mode = st.sidebar.radio("Sistem Modu", ["Öğrenci Ekranı", "Yönetici Pan
 # --------------------------
 if page_mode == "Öğrenci Ekranı":
     st.title("🍽️ LezzetMetre")
-    
     anlik_zaman = datetime.now()
     tarih_gosterim = anlik_zaman.strftime("%d.%m.%Y")
     st.info(f"📅 Tarih: **{tarih_gosterim}**")
     
-    ogun = st.selectbox("Hangi öğün için oy veriyorsun?", 
-                        ["Seçiniz...", "KAHVALTI", "ÖĞLE", "AKŞAM", "ARA ÖĞÜN"])
+    ogun = st.selectbox("Hangi öğün için oy veriyorsun?", ["Seçiniz...", "KAHVALTI", "ÖĞLE", "AKŞAM", "ARA ÖĞÜN"])
     
     if ogun != "Seçiniz...":
         menu_data = get_todays_menu()
@@ -141,7 +145,6 @@ if page_mode == "Öğrenci Ekranı":
         else:
             raw_menu_text = menu_data.get(ogun, "")
             yemekler = parse_yemek_listesi(raw_menu_text)
-            
             with st.form("oylama_formu"):
                 if ogun in ["ÖĞLE", "AKŞAM"]:
                     st.markdown("### 🍲 Menüde Ne Var?")
@@ -151,9 +154,7 @@ if page_mode == "Öğrenci Ekranı":
                 elif ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
                     st.markdown(f"**{ogun} İçeriği:**")
                     if yemekler: st.info(", ".join(yemekler))
-                
                 st.write("---")
-                
                 if ogun in ["KAHVALTI", "ARA ÖĞÜN"]:
                     c1, c2, c3 = st.columns(3)
                     with c1: puan_lezzet = st.slider("😋 Lezzet", 1, 5, 3)
@@ -166,17 +167,14 @@ if page_mode == "Öğrenci Ekranı":
                     with c1: puan_lezzet = st.selectbox("😋 Lezzet", [1,2,3,4,5], index=2)
                     with c2: puan_hijyen = st.selectbox("🧼 Hijyen", [1,2,3,4,5], index=2)
                     with c3: puan_servis = st.selectbox("💁‍♂️ Servis", [1,2,3,4,5], index=2)
-                    
                     if yemekler:
                         st.write("#### Detaylar (Opsiyonel):")
                         col_a, col_b = st.columns(2)
                         with col_a: begenilen = st.selectbox("🏆 En Beğendiğin?", ["Seçim Yok"] + yemekler)
                         with col_b: sikayet = st.selectbox("👎 Sorunlu Olan?", ["Seçim Yok"] + yemekler)
                     else: begenilen, sikayet = "", ""
-
                 yorum = st.text_area("Eklemek istediklerin:", placeholder="Fikrin bizim için değerli...")
                 submit = st.form_submit_button("GÖNDER 🚀")
-                
                 if submit:
                     if begenilen == "Seçim Yok": begenilen = ""
                     if sikayet == "Seçim Yok": sikayet = ""
@@ -192,7 +190,6 @@ elif page_mode == "Yönetici Paneli":
     st.sidebar.title("🔐 Giriş Paneli")
     pwd = st.sidebar.text_input("Şifre", type="password")
     
-    # Secrets'tan şifreleri al
     ADMIN_PWD = st.secrets["passwords"]["admin"]
     CHEF_PWD = st.secrets["passwords"]["chef"]
 
@@ -206,31 +203,33 @@ elif page_mode == "Yönetici Paneli":
     # --- ROL: SÜPER ADMIN ---
     if pwd == ADMIN_PWD:
         st.title("📊 Süper Admin Paneli")
-        st.success("Yönetici girişi yapıldı.")
         
-        # --- MODEL SEÇİMİ (YENİ) ---
+        # --- DİNAMİK MODEL SEÇİMİ (API'DEN ÇEKER) ---
         st.sidebar.markdown("---")
-        st.sidebar.subheader("🤖 AI Ayarları")
+        st.sidebar.subheader("🤖 AI Model Seçimi")
         
-        # Kullanılabilir modeller listesi (Gelecekte buraya yenilerini ekleyebilirsin)
-        available_models = [
-            "gemini-1.5-flash", # Hızlı, ucuz, varsayılan
-            "gemini-1.5-pro",   # Daha zeki ama biraz daha yavaş
-            "gemini-pro"        # Eski sürüm (Yedek)
-        ]
+        # Google'dan tüm modelleri çek
+        available_models = get_available_gemini_models()
         
+        # Varsayılanı 'gemini-2.5-flash' yapmaya çalış
+        target_default = "gemini-2.5-flash"
+        default_index = 0
+        
+        # Eğer listede varsa onu seç, yoksa listenin başındakini seç
+        if target_default in available_models:
+            default_index = available_models.index(target_default)
+            
         selected_model = st.sidebar.selectbox(
-            "Kullanılacak Yapay Zeka Modeli", 
+            "Aktif Model", 
             available_models,
-            index=0 # Varsayılan olarak Flash seçili gelir
+            index=default_index
         )
-        st.sidebar.info(f"Seçili Model: **{selected_model}**")
-        # ---------------------------
+        st.sidebar.success(f"Seçili: **{selected_model}**")
+        # ---------------------------------------------
 
         if not df.empty:
             filtre_tarih = st.radio("Zaman Aralığı", ["Bugün", "Son 7 Gün", "Tüm Kayıtlar"], horizontal=True)
             now = datetime.now()
-            
             if filtre_tarih == "Bugün":
                 df_filtered = df[df['Zaman'].dt.date == now.date()]
             elif filtre_tarih == "Son 7 Gün":
@@ -243,47 +242,37 @@ elif page_mode == "Yönetici Paneli":
             c2.metric("Lezzet", f"{df_filtered['Puan_Lezzet'].mean():.1f}")
             c3.metric("Hijyen", f"{df_filtered['Puan_Hijyen'].mean():.1f}")
             c4.metric("Servis", f"{df_filtered['Puan_Servis'].mean():.1f}")
-            
             st.divider()
             
-            tab1, tab2, tab3 = st.tabs(["🤖 Detaylı AI Rapor", "📈 Grafikler", "📝 Tüm Veriler"])
-            
+            tab1, tab2, tab3 = st.tabs(["🤖 AI Rapor", "📈 Grafikler", "📝 Veriler"])
             with tab1:
-                st.caption(f"Analiz **{selected_model}** modeli kullanılarak yapılıyor.")
+                st.caption(f"Analiz Modeli: **{selected_model}**")
                 if st.button("Rapor Oluştur"):
                     with st.spinner("Analiz ediliyor..."):
                         yorum_listesi = [str(y) for y in df_filtered['Yorum'] if str(y).strip()]
-                        
                         if not yorum_listesi:
                             st.warning("Analiz yapılacak yeterli yorum yok.")
                         else:
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet: {df_filtered['Puan_Lezzet'].mean():.1f}"
-                            
-                            # Seçilen modeli fonksiyona gönderiyoruz
                             analiz = analyze_comments_with_ai(text_data, stats, role="admin", model_name=selected_model)
                             st.markdown(analiz)
-
             with tab2:
                 st.bar_chart(df_filtered[['Puan_Lezzet', 'Puan_Hijyen', 'Puan_Servis']].mean())
                 if 'Begenilen_Yemek' in df_filtered.columns:
                     st.write("En Beğenilenler:")
                     st.bar_chart(df_filtered['Begenilen_Yemek'].value_counts().head(5))
-
             with tab3:
                 st.dataframe(df_filtered)
         else:
             st.warning("Henüz veri yok.")
 
-    # --- ROL: AŞÇI / MUTFAK EKİBİ ---
+    # --- ROL: AŞÇI ---
     elif pwd == CHEF_PWD:
         st.title("👨‍🍳 Mutfak Ekibi Paneli")
-        st.success("Hoşgeldiniz Ustalarım!")
-        
         if not df.empty:
             now = datetime.now()
             df_today = df[df['Zaman'].dt.date == now.date()]
-            
             if not df_today.empty:
                 st.subheader(f"📅 Bugünün ({now.strftime('%d.%m.%Y')}) Karnesi")
                 k1, k2, k3 = st.columns(3)
@@ -291,26 +280,23 @@ elif page_mode == "Yönetici Paneli":
                 k1.metric("😋 Lezzet Puanı", f"{lezzet_puan:.1f}/5")
                 k2.metric("🧼 Temizlik", f"{df_today['Puan_Hijyen'].mean():.1f}/5")
                 k3.metric("Oy Sayısı", len(df_today))
-                
                 st.divider()
-                st.subheader("📢 Öğrencilerin Mesajı")
-                
                 if st.button("Günün Özetini Oku (AI)"):
                     with st.spinner("Hazırlanıyor..."):
                         yorum_listesi = [str(y) for y in df_today['Yorum'] if str(y).strip()]
-                        
                         if not yorum_listesi:
-                            st.info("Henüz yazılı bir yorum yapılmamış ustam.")
+                            st.info("Yorum yok ustam.")
                         else:
                             text_data = "\n".join(yorum_listesi)
                             stats = f"Lezzet Puanı: {lezzet_puan:.1f}"
-                            # Aşçılar için varsayılan (en hızlı) modeli kullanıyoruz
-                            ozet = analyze_comments_with_ai(text_data, stats, role="cook", model_name="gemini-1.5-flash")
+                            # Aşçılar için varsayılan olarak seçili modeli kullanmayalım, her zaman en hızlısı kalsın mı?
+                            # Hayır, senin tercihinle orası da gemini-2.5-flash olsun.
+                            ozet = analyze_comments_with_ai(text_data, stats, role="cook", model_name="gemini-2.5-flash")
                             st.info(ozet)
             else:
-                st.info("Bugün henüz veri girişi yok.")
+                st.info("Bugün veri yok.")
         else:
-            st.warning("Sistemde hiç veri yok.")
+            st.warning("Sistemde veri yok.")
 
     elif pwd:
         st.error("Hatalı Şifre!")
