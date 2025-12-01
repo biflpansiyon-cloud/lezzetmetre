@@ -43,7 +43,7 @@ def get_active_meal(current_time):
     """Şu anki saate göre aktif öğünü belirler."""
     current_time = current_time.replace(tzinfo=None)
     
-    if time(7, 0) <= current_time <= time(8, 20):
+    if time(7, 0) <= current_time <= time(10, 20):
         return "KAHVALTI"
     elif time(12, 0) <= current_time <= time(14, 30):
         return "ÖĞLE"
@@ -287,8 +287,8 @@ if page_mode == "Öğrenci Ekranı":
     else:
         st.warning("⛔ **Şu an aktif bir yemek saati değil.**")
         st.markdown("""
-        **Yemek Saatleri:**
-        * 🍳 **Kahvaltı:** 07:00 - 08:20
+        **Yemek Değerlendirme Saatleri:**
+        * 🍳 **Kahvaltı:** 07:00 - 10:20
         * 🍲 **Öğle:** 12:00 - 14:30
         * 🥗 **Akşam:** 18:00 - 19:00
         * 🍪 **Ara Öğün:** 21:15 - 22:00
